@@ -122,6 +122,35 @@ jobs:
       - name: Build package
         run: python -m build
 
+      - name: Verify wheel contents (training/ excluded, collection/ included)
+        run: |
+          python - <<'PY'
+          import glob, sys, zipfile
+
+          wheel = sorted(glob.glob("dist/*.whl"))[-1]
+          names = zipfile.ZipFile(wheel).namelist()
+
+          leaked = [
+              n for n in names
+              if n.startswith("training")
+              or "/class_mapping" in n
+              or "/prepare_dataset" in n
+              or "/review_cli" in n
+              or n.endswith("train.py")
+              or n.endswith("export_onnx.py")
+              or n.endswith("compute_sha256.py")
+          ]
+          if leaked:
+              print(f"ERROR: training/ artifacts leaked into wheel: {leaked}")
+              sys.exit(1)
+
+          if not any("vision_ai_recaptcha_solver/collection/collector.py" in n for n in names):
+              print("ERROR: collection/ module missing from wheel")
+              sys.exit(1)
+
+          print(f"OK: {wheel} excludes training/, includes collection/")
+          PY
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
