@@ -28,6 +28,8 @@ from vision_ai_recaptcha_solver.types import (
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
+    from vision_ai_recaptcha_solver.collection import DataCollector
+
 
 class YOLODetector:
     """Detector for reCAPTCHA challenges using YOLO models.
@@ -51,6 +53,7 @@ class YOLODetector:
         conf_threshold: float = 0.7,
         fourth_cell_threshold: float = 0.7,
         detection_conf_threshold: float = 0.6,
+        collector: DataCollector | None = None,
     ) -> None:
         """Initialize the detector with both classification and detection models.
 
@@ -62,11 +65,15 @@ class YOLODetector:
             conf_threshold: Confidence threshold for tile classification.
             fourth_cell_threshold: Threshold to include a 4th cell in selection.
             detection_conf_threshold: Confidence threshold for 4x4 detection model.
+            collector: Optional active-learning data collector. When provided and
+                enabled, uncertain tiles are forwarded for review. Default None keeps
+                full back-compat (no behavior change).
         """
         self.model_path = Path(model_path) if model_path else self.get_model_path()
         self.detection_model_path = detection_model_path or self.DEFAULT_DETECTION_MODEL
         self.verbose = verbose
         self.logger = logger or logging.getLogger(__name__)
+        self.collector = collector
 
         # Store threshold configuration
         self.conf_threshold = conf_threshold
@@ -529,9 +536,21 @@ class YOLODetector:
         confidences = self.get_target_confidences_batch(tiles, target_class)
 
         results: list[tuple[int, float]] = []
-        for cell_num, target_conf in zip(cell_nums, confidences, strict=True):
+        collect = self.collector is not None and self.collector.enabled
+        for tile, cell_num, target_conf in zip(tiles, cell_nums, confidences, strict=True):
             results.append((cell_num, target_conf))
             self.logger.debug(f"Tile {cell_num}: {target_name} conf {target_conf:.2f}")
+
+            # Active-learning hook: reuse the already-cropped tile (DRY); collector
+            # applies the uncertain-band threshold and stays a no-op when disabled.
+            if collect:
+                assert self.collector is not None
+                self.collector.record_tile(
+                    tile,
+                    cell=cell_num,
+                    confidence=target_conf,
+                    predicted_class=target_name,
+                )
 
         return results
 

@@ -27,6 +27,7 @@ from vision_ai_recaptcha_solver.browser.navigation import (
 from vision_ai_recaptcha_solver.captcha.dynamic_handler import DynamicCaptchaHandler
 from vision_ai_recaptcha_solver.captcha.selection_handler import SelectionCaptchaHandler
 from vision_ai_recaptcha_solver.captcha.square_handler import SquareCaptchaHandler
+from vision_ai_recaptcha_solver.collection import DataCollector
 from vision_ai_recaptcha_solver.config import SolverConfig
 from vision_ai_recaptcha_solver.detector.yolo_detector import YOLODetector
 from vision_ai_recaptcha_solver.exceptions import (
@@ -145,6 +146,9 @@ class RecaptchaSolver:
         self._owns_download_dir: bool = False
         self._init_download_dir()
 
+        # Opt-in active-learning collector (no-op unless config.collect_data is True)
+        self._collector = DataCollector(self.config, self.logger)
+
         # Initialize detector with both classification and detection models
         self._detector = YOLODetector(
             model_path=self.config.model_path,
@@ -154,6 +158,7 @@ class RecaptchaSolver:
             conf_threshold=self.config.conf_threshold,
             fourth_cell_threshold=self.config.fourth_cell_threshold,
             detection_conf_threshold=self.config.detection_conf_threshold,
+            collector=self._collector,
         )
 
         # Initialize handlers
@@ -412,7 +417,7 @@ class RecaptchaSolver:
                     # Determine captcha type and get target
                     captcha_type = self._determine_captcha_type(browser)
                     last_captcha_type = captcha_type
-                    target_class = self._get_target_class(browser)
+                    target_class = self._get_target_class(browser, captcha_type)
 
                     if target_class is None:
                         self.logger.info("Unknown target, reloading captcha")
@@ -489,6 +494,7 @@ class RecaptchaSolver:
             token = token_handle.wait(timeout=self.config.timeout) if token_handle else None
 
             if not token:
+                self._collector.record_failure(last_captcha_type, keyword=None, reason="failed")
                 raise TokenExtractionError("Failed to extract reCAPTCHA token")
 
             result_cookies = self._get_cookies(browser)
@@ -527,20 +533,28 @@ class RecaptchaSolver:
         else:
             return CaptchaType.SELECTION_3X3
 
-    def _get_target_class(self, browser: Any) -> int | None:
+    def _get_target_class(self, browser: Any, captcha_type: CaptchaType) -> int | None:
         """Get the YOLO class index for the target object.
 
         Args:
             browser: Browser instance.
+            captcha_type: Current challenge type (used to annotate collected data).
 
         Returns:
             YOLO class index, or None if target is unknown.
         """
         keyword = get_target_keyword(browser)
+        # Forward solve context so the detector can annotate collected tiles.
+        self._collector.set_context(captcha_type=captcha_type, keyword=keyword)
+
         if not keyword:
+            self._collector.record_failure(captcha_type, keyword=None, reason="unknown_keyword")
             return None
 
-        return self._detector.get_target_class(keyword)
+        target_class = self._detector.get_target_class(keyword)
+        if target_class is None:
+            self._collector.record_failure(captcha_type, keyword=keyword, reason="unknown_keyword")
+        return target_class
 
     def _get_handler(self, captcha_type: CaptchaType) -> BaseCaptchaHandler:
         """Get the appropriate handler for a captcha type.

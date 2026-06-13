@@ -87,3 +87,11 @@ src/recaptcha_solver/models/*.onnx
 yolo12x.pt
 recaptcha_classification_57k.onnx
 modelOld.onnx
+
+# Active-learning runtime output (never commit collected samples)
+collected/
+
+# Training dataset (raw images live on Hugging Face / git-lfs, not in git)
+training/dataset/
+training/runs/
+runs/
