@@ -167,8 +167,10 @@ COCO detection → custom detection (if a model is loaded) → per-cell fallback
 > Detection needs **full-image + bounding-box** data, which the per-cell classification
 > flywheel does NOT produce. Tier B has its own collection + annotation pipeline.
 
-1. **Collect full images** — enable collection; `DataCollector.record_challenge_image`
-   saves whole 4x4 images to `collected/full/` + `collected/full/metadata.jsonl`.
+1. **Collect full images** — enable collection (`collect_data=True`); each 4x4 solve saves
+   the whole image to `collected/full/` + `collected/full/metadata.jsonl` via
+   `DataCollector.record_challenge_image`. Drive many solves with the loop helper:
+   `python training/collect.py --runs 200 --delay 3` (reports `full-4x4` / `tiles` counts).
 2. **Annotate (cell → bbox)** — `python training/annotate_detection_cli.py --collected-dir
    collected/full --open`: pick class + cells (1..16); each selected cell becomes one YOLO
    box (cell-level weak supervision) → `annotations.jsonl`.
@@ -180,9 +182,10 @@ COCO detection → custom detection (if a model is loaded) → per-cell fallback
    Tier B set is small, so an Apple Silicon Mac (`--device mps --no-amp`) is a fine choice —
    no dataset upload. Use a cloud CUDA GPU if it grows large. (Phase 3: `train_detection.py`
    reuses `device_utils.resolve_device` + the `--amp/--no-amp` flag, like `train.py`.)
-5. **Export + SHA256 + publish** — `export_onnx.py --weights .../best.pt`,
-   `compute_sha256.py best.onnx`, then set `YOLODetector.CUSTOM_DETECTION_MODEL_URL` +
-   `CUSTOM_DETECTION_SHA256`, upload to Hugging Face.
+5. **Export + SHA256 + card + publish** — `export_onnx.py --weights .../best.pt` (needs the
+   `onnx` package — `pip install -e ".[dev]"`), `compute_sha256.py best.onnx`,
+   `write_model_card.py --onnx best.onnx --task detect ...`, then set
+   `YOLODetector.CUSTOM_DETECTION_MODEL_URL` + `CUSTOM_DETECTION_SHA256`, upload to Hugging Face.
 6. **Enable at runtime** — `SolverConfig(custom_detection_model_path="...onnx")`. With no
    path set (default) the runtime is unchanged (COCO + per-cell fallback).
 

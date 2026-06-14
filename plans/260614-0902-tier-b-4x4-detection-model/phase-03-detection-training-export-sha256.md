@@ -1,10 +1,11 @@
 ---
 phase: 3
-title: "Detection training + export + SHA256"
-status: pending
+title: Detection training + export + SHA256
+status: completed
 priority: P2
-effort: "0.5d code + train time GPU ngoài máy"
-dependencies: [2]
+effort: 0.5d code + train time GPU ngoài máy
+dependencies:
+  - 2
 ---
 
 # Phase 3: Detection training + export + SHA256

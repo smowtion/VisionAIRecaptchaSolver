@@ -158,6 +158,15 @@ def validate_against_class_names() -> None:
             label in LABEL_TO_FOLDER or label in DETECTION_ONLY_LABELS or label in LABEL_ALIASES
         ), f"solver label {label!r} is unaccounted for in class_mapping"
 
+    # Tier B: training detection class order MUST match the runtime mapping, or a published
+    # model card / detector would disagree on class ids.
+    from vision_ai_recaptcha_solver.types import CUSTOM_DETECTION_CLASSES
+
+    assert DETECTION_CLASSES == CUSTOM_DETECTION_CLASSES, (
+        "detection class order drifted between training (DETECTION_CLASSES) and "
+        "runtime (types.CUSTOM_DETECTION_CLASSES)"
+    )
+
 
 if __name__ == "__main__":
     validate_against_class_names()

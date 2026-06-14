@@ -1,7 +1,7 @@
 ---
 title: 'Tier B: custom 4x4 detection model (bbox pipeline + train + integrate)'
 description: ''
-status: pending
+status: completed
 priority: P2
 branch: feat/data-flywheel
 tags: []
@@ -36,10 +36,18 @@ Tầng B của data flywheel: train **custom detection model** cho 4x4 — đún
 |-------|------|--------|
 | 1 | [Full-image 4x4 collection](./phase-01-full-image-4x4-collection.md) | Completed |
 | 2 | [Cell-bbox annotation + detection dataset](./phase-02-cell-bbox-annotation-detection-dataset.md) | Completed |
-| 3 | [Detection training + export + SHA256](./phase-03-detection-training-export-sha256.md) | Pending |
+| 3 | [Detection training + export + SHA256](./phase-03-detection-training-export-sha256.md) | Completed |
 | 4 | [Integrate custom 4x4 detection model + publish](./phase-04-integrate-custom-4x4-detection-model-publish.md) | Completed |
 
-## Implementation Log (cook --tdd — 2026-06-14, Phases 1/2/4; Phase 3 deferred)
+## Implementation Log (cook --tdd — 2026-06-14, all 4 phases)
+
+### Update (autonomous run): Phase 3 + collect driver done
+- **Phase 3:** `train_detection.py` (YOLO detect, device auto CUDA>MPS>CPU, `--amp/--no-amp`, `--resume`), `write_model_card.py`, reuse `export_onnx.py`/`compute_sha256.py`; `device_utils.resolve_device`. `collect.py` (loop driver + progress counters). Tests: `test_train_detection_args.py`.
+- **Smoke (verified end-to-end on MPS):** synthetic YOLO-detect dataset → `train_detection.train(device=mps, base=yolo11n.pt, 1 epoch)` → produced `best.pt` (args.yaml: task=detect, device=mps). Export needs `onnx` pkg → added to dev extras (`onnx`, `onnxslim`); runtime keeps `onnxruntime` only.
+- **Gate (final):** 145 unit passed, 1 deselected; ruff `src/`+`training/` clean; mypy `src/` 4 pre-existing only.
+- **STILL BLOCKED on human:** a real custom model needs collected 4x4 images **annotated by a person** (`annotate_detection_cli`). Cannot be automated (no auto pseudo-label). Pipeline is code-complete + smoke-proven; the trained artifact awaits annotation.
+
+### Original (Phases 1/2/4)
 
 - **Phase 1:** `DataCollector.record_challenge_image` (ảnh 4x4 full → `collected/full/`, metadata riêng); hook ở `square_handler`; `_append_metadata(subdir=)`. Tests: `test_data_collector.py` (+3).
 - **Phase 2:** `class_mapping.DETECTION_CLASSES`/`detection_class_id`; `prepare_detection_dataset.py` (`cell_to_yolo_bbox` + YOLO detect dataset + data.yaml); `annotate_detection_cli.py`. Tests: `test_detection_dataset.py`.
