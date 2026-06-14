@@ -171,9 +171,16 @@ COCO detection → custom detection (if a model is loaded) → per-cell fallback
    the whole image to `collected/full/` + `collected/full/metadata.jsonl` via
    `DataCollector.record_challenge_image`. Drive many solves with the loop helper:
    `python training/collect.py --runs 200 --delay 3` (reports `full-4x4` / `tiles` counts).
-2. **Annotate (cell → bbox)** — `python training/annotate_detection_cli.py --collected-dir
-   collected/full --open`: pick class + cells (1..16); each selected cell becomes one YOLO
-   box (cell-level weak supervision) → `annotations.jsonl`.
+2. **Annotate (cell → bbox)** — produces `annotations.jsonl`. Two ways:
+   - **Manual:** `python training/annotate_detection_cli.py --collected-dir collected/full
+     --open` — pick class + cells (1..16) per image.
+   - **Auto (CapMonster, ~$0.04/1000):** `export CAPMONSTER_API_KEY=... &&
+     python training/auto_annotate_capmonster.py --collected-dir collected/full` — sends each
+     4x4 image to CapMonster's image mode (`ComplexImageTask`/`recaptcha`), which returns the
+     cells; cheaply bypasses manual labeling. Only the 7 detection classes are labeled
+     (others skipped). Note: this is CapMonster's own classifier output — high but not perfect
+     accuracy; spot-check before training. (cap.guru can't do this — token mode only.)
+   Each selected cell becomes one YOLO box (cell-level weak supervision).
 3. **Build detection dataset** — `python training/prepare_detection_dataset.py --annotations
    collected/full/annotations.jsonl --dataset training/detection_dataset`: emits
    `images/`, `labels/`, `data.yaml` (names = `class_mapping.DETECTION_CLASSES`).
