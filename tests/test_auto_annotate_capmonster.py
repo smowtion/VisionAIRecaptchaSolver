@@ -33,6 +33,13 @@ class TestExtractCells:
     def test_bare_list(self) -> None:
         assert aa.extract_cells([3, 4]) == [3, 4]
 
+    def test_boolean_mask(self) -> None:
+        # CapMonster's real format: 16-element bool mask -> True indices (0-indexed).
+        mask = [False] * 16
+        for i in (4, 8, 9, 10):
+            mask[i] = True
+        assert aa.extract_cells({"answer": mask}) == [4, 8, 9, 10]
+
     def test_empty(self) -> None:
         assert aa.extract_cells({}) == []
         assert aa.extract_cells(None) == []

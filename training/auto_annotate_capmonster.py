@@ -49,13 +49,24 @@ def resolve_detection_label(keyword: str | None) -> str | None:
 
 
 def extract_cells(solution: Any) -> list[int]:
-    """Pull the cell-number array out of CapMonster's solution (defensive about the key)."""
+    """Return 0-indexed selected cells from CapMonster's solution.
+
+    CapMonster ComplexImageTask returns ``solution.answer`` as a 16-element BOOLEAN mask
+    (one flag per cell, True = contains the target). We also defensively handle a plain
+    list of cell indices in case the format varies.
+    """
     if isinstance(solution, list):
         raw = solution
     elif isinstance(solution, dict):
         raw = next((solution[k] for k in _SOLUTION_KEYS if isinstance(solution.get(k), list)), [])
     else:
         raw = []
+    if not raw:
+        return []
+    # Boolean mask -> indices where True. (bool is a subclass of int, so check bool first.)
+    if all(isinstance(x, bool) for x in raw):
+        return [i for i, flag in enumerate(raw) if flag]
+    # Already a list of cell indices.
     return [int(x) for x in raw]
 
 
