@@ -59,7 +59,7 @@ Tầng B của data flywheel: train **custom detection model** cho 4x4 — đún
 
 - **blockedBy:** `260614-0805-solver-fast-high-success-fix` (đã completed) — per-cell fallback là cầu nối; Tầng B thay thế khi model sẵn sàng.
 - Dùng tooling `training/` của `260613-1719-recaptcha-suite-data-flywheel` (completed) làm khuôn (export/sha256/class_mapping pattern).
-- **Cần GPU** (Phase 3 train) — ngoài máy Mac; Phase 1,2,4 codeable + test khô local.
+- **Train (Phase 3):** chạy trên **Mac M2 Max MPS** (`--device mps`, dataset Tier B nhỏ, data local) HOẶC cloud CUDA (Colab) nếu dataset lớn. Scripts auto-detect device (`device_utils.resolve_device`). Phase 1,2,4 codeable + test khô local.
 
 ## Kỳ vọng thực tế (brutal honesty)
 

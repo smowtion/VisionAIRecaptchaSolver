@@ -16,6 +16,19 @@ def test_train_module_imports_and_has_defaults() -> None:
     assert sig.parameters["epochs"].default == 50
     assert sig.parameters["imgsz"].default == 640
     assert sig.parameters["batch"].default == 64
+    assert sig.parameters["amp"].default is True
+    assert sig.parameters["device"].default is None  # auto-detect
+
+
+def test_resolve_device_explicit_passthrough() -> None:
+    from device_utils import resolve_device
+
+    assert resolve_device("0") == 0
+    assert resolve_device("cpu") == "cpu"
+    assert resolve_device("mps") == "mps"
+    # auto-detect returns one of the valid backends for this machine
+    assert resolve_device() in (0, "mps", "cpu")
+    assert resolve_device("auto") in (0, "mps", "cpu")
 
 
 def test_train_cli_help() -> None:

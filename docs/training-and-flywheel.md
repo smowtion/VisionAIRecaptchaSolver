@@ -80,16 +80,26 @@ stratified per class and deterministic for a given `--seed`.
 > Light=13), matching the model's embedded `names`. Validate any time with:
 > `python training/class_mapping.py`.
 
-## 4. Train (cloud GPU)
+## 4. Train (GPU: CUDA, Apple-Silicon MPS, or CPU)
 
-Mac has no CUDA — train on a cloud GPU (Colab / cloud VM). Hyperparameters mirror the
-original notebook (base `yolo11x-cls.pt`, epochs=50, imgsz=640, batch=64, patience=15,
-amp + cache on).
+`train.py` auto-detects the device (CUDA > MPS > CPU via `device_utils.resolve_device`), so
+it runs on a cloud CUDA GPU **or** an Apple Silicon Mac (Metal/MPS) **or** CPU. Macs have no
+CUDA but M-series chips train on MPS. Hyperparameters mirror the original notebook
+(base `yolo11x-cls.pt`, epochs=50, imgsz=640, batch=64, patience=15, amp + cache on).
+
+- **Small datasets** (e.g. the Tier B 4x4 set you collect+annotate): an Apple Silicon Mac
+  (`--device mps`, or just `auto`) is fine — data stays local, no upload.
+- **Large datasets** (e.g. a full 57k classification retrain): prefer a cloud CUDA GPU
+  (Colab / cloud VM) — faster and frees the Mac.
 
 ```bash
-python training/train.py --data training/dataset --device 0
-python training/train.py --resume            # continue from last best.pt
+python training/train.py --data training/dataset                  # auto device
+python training/train.py --data training/dataset --device mps --no-amp   # Apple Silicon
+python training/train.py --data training/dataset --device 0       # explicit CUDA
+python training/train.py --resume                                 # continue from best.pt
 ```
+
+> On MPS, pass `--no-amp` if mixed precision misbehaves (some ops lack MPS kernels).
 
 Output: `runs/classify/rec_cls_model/weights/best.pt`.
 
@@ -165,8 +175,11 @@ COCO detection → custom detection (if a model is loaded) → per-cell fallback
 3. **Build detection dataset** — `python training/prepare_detection_dataset.py --annotations
    collected/full/annotations.jsonl --dataset training/detection_dataset`: emits
    `images/`, `labels/`, `data.yaml` (names = `class_mapping.DETECTION_CLASSES`).
-4. **Train (cloud GPU)** — `python training/train_detection.py --data
-   training/detection_dataset/data.yaml --device 0` (base `yolo11x.pt`, task detect).
+4. **Train (CUDA / Apple-Silicon MPS / CPU)** — `python training/train_detection.py --data
+   training/detection_dataset/data.yaml` (auto device; base `yolo11x.pt`, task detect). The
+   Tier B set is small, so an Apple Silicon Mac (`--device mps --no-amp`) is a fine choice —
+   no dataset upload. Use a cloud CUDA GPU if it grows large. (Phase 3: `train_detection.py`
+   reuses `device_utils.resolve_device` + the `--amp/--no-amp` flag, like `train.py`.)
 5. **Export + SHA256 + publish** — `export_onnx.py --weights .../best.pt`,
    `compute_sha256.py best.onnx`, then set `YOLODetector.CUSTOM_DETECTION_MODEL_URL` +
    `CUSTOM_DETECTION_SHA256`, upload to Hugging Face.

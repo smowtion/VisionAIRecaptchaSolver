@@ -11,12 +11,12 @@ dependencies: [2]
 
 ## Overview
 
-Script train YOLO **detection** trên dataset Phase 2 (cloud GPU thủ công, Mac không CUDA), export ONNX, tính SHA256, sinh model_card. Test khô (parse args, không train). Train thật chạy ngoài máy, ghi kết quả.
+Script train YOLO **detection** trên dataset Phase 2, export ONNX, tính SHA256, sinh model_card. Test khô (parse args, không train). Train thật: **Mac M2 Max MPS** (`--device mps`, dataset nhỏ, data local) hoặc cloud CUDA (Colab) nếu lớn — `train_detection.py` tái dùng `device_utils.resolve_device` (auto CUDA>MPS>CPU) + `--amp/--no-amp` (như `train.py` đã làm).
 
 ## Requirements
 
 - Functional:
-  - `training/train_detection.py`: `train(data="...data.yaml", epochs, imgsz=640, batch, device, ...)` dùng `YOLO("yolo11x.pt")` (detect, không phải -cls); CLI argparse/click; `--resume`. Import lười `ultralytics` (import/`--help` chạy không GPU).
+  - `training/train_detection.py`: `train(data="...data.yaml", epochs, imgsz=640, batch, device=None, amp=True, ...)` dùng `YOLO("yolo11x.pt")` (detect, không phải -cls); CLI click; `--resume`; `--device auto` (qua `device_utils.resolve_device`) + `--amp/--no-amp`. Import lười `ultralytics` (import/`--help` chạy không GPU).
   - Export: tái dùng `training/export_onnx.py` (đã tham số `--weights`) — detect weights export ONNX dynamic.
   - SHA256: tái dùng `training/compute_sha256.py`.
   - model_card sidecar: `{date, task:"detect", classes:DETECTION_CLASSES, epochs, imgsz, sha256, dataset_size}` (script nhỏ hoặc flag).
