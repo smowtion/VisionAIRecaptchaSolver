@@ -60,6 +60,42 @@ LABEL_TO_FOLDER: dict[str, str] = {
 # Solver labels that exist only for the 4x4 COCO detection model (no classification folder).
 DETECTION_ONLY_LABELS: set[str] = {"boats", "parking meters"}
 
+# Tier B custom 4x4 detection model: the reCAPTCHA classes the COCO model LACKS, so 4x4
+# challenges for them currently fall back to per-cell classification. Ordered -> class id.
+DETECTION_CLASSES: list[str] = [
+    "bridges",
+    "chimneys",
+    "crosswalks",
+    "mountains or hills",
+    "palm trees",
+    "stairs",
+    "tractors",
+]
+
+DETECTION_LABEL_TO_ID: dict[str, int] = {label: i for i, label in enumerate(DETECTION_CLASSES)}
+
+
+def detection_class_id(name: str) -> int:
+    """Resolve a solver label or dataset folder name to a detection class id.
+
+    Args:
+        name: Solver label (e.g. "stairs") or folder name (e.g. "Stair").
+
+    Returns:
+        Detection class id (index into DETECTION_CLASSES).
+
+    Raises:
+        KeyError: If the name is not one of the detection classes.
+    """
+    key = name.strip().lower()
+    if key in DETECTION_LABEL_TO_ID:
+        return DETECTION_LABEL_TO_ID[key]
+    label = FOLDER_TO_LABEL[normalize_folder(name)]
+    if label in DETECTION_LABEL_TO_ID:
+        return DETECTION_LABEL_TO_ID[label]
+    raise KeyError(f"{name!r} is not a detection class")
+
+
 # Solver labels handled by an existing folder via alias (e.g. taxis are detected as cars).
 LABEL_ALIASES: dict[str, str] = {"taxis": "Car"}
 

@@ -108,6 +108,11 @@ class SolverConfig:
     collect_data: bool = False
     collect_dir: Path | str | None = None
 
+    # Custom 4x4 detection model (Tier B). When set, 4x4 challenges for classes the COCO
+    # model lacks use this detection model instead of the per-cell classification fallback.
+    # None (default) keeps current behavior (COCO + per-cell fallback).
+    custom_detection_model_path: Path | str | None = None
+
     _server_port_explicit: bool = field(init=False, repr=False, default=False)
     _download_dir_explicit: bool = field(init=False, repr=False, default=False)
 
@@ -174,6 +179,17 @@ class SolverConfig:
                     f"collect_dir must be a str or Path, got {type(self.collect_dir).__name__}"
                 )
             object.__setattr__(self, "collect_dir", Path(self.collect_dir))
+
+        # Validate / normalize custom detection model path
+        if self.custom_detection_model_path is not None:
+            if not isinstance(self.custom_detection_model_path, str | Path):
+                raise ValueError(
+                    "custom_detection_model_path must be a str or Path, got "
+                    f"{type(self.custom_detection_model_path).__name__}"
+                )
+            object.__setattr__(
+                self, "custom_detection_model_path", Path(self.custom_detection_model_path)
+            )
 
         # Validate proxy URL format if provided
         if self.proxy is not None:

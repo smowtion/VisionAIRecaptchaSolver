@@ -127,6 +127,52 @@ class TestRecordFailure:
         assert len(pngs) == 1
 
 
+class TestRecordChallengeImage:
+    """Full-image 4x4 capture for the detection dataset (separate from per-cell tiles)."""
+
+    def _full_meta(self, collect_dir: Path) -> list[dict]:
+        meta = collect_dir / "full" / "metadata.jsonl"
+        if not meta.exists():
+            return []
+        return [json.loads(line) for line in meta.read_text().splitlines() if line.strip()]
+
+    def test_full_image_written(self, tmp_path: Path) -> None:
+        collector = _make_collector(tmp_path)
+        collector.record_challenge_image(
+            _tile(20), keyword="stairs", captcha_type=CaptchaType.SQUARE_4X4
+        )
+        pngs = list((tmp_path / "collected" / "full").rglob("*.png"))
+        assert len(pngs) == 1
+        rows = self._full_meta(tmp_path / "collected")
+        assert len(rows) == 1
+        assert rows[0]["keyword"] == "stairs"
+        assert rows[0]["captcha_type"] == "square_4x4"
+        assert rows[0]["reason"] == "detection_4x4"
+        assert Path(rows[0]["image_path"]).exists()
+
+    def test_full_image_disabled_no_io(self, tmp_path: Path) -> None:
+        config = SolverConfig(collect_data=False, collect_dir=tmp_path / "collected")
+        collector = DataCollector(config)
+        collector.record_challenge_image(
+            _tile(), keyword="stairs", captcha_type=CaptchaType.SQUARE_4X4
+        )
+        assert not (tmp_path / "collected").exists()
+
+    def test_full_image_separate_from_per_cell(self, tmp_path: Path) -> None:
+        # Per-cell ledger and full ledger must not collide.
+        collector = _make_collector(tmp_path)
+        collector.record_tile(
+            _tile(), cell=1, confidence=0.5, predicted_class="Stair",
+            captcha_type=CaptchaType.SQUARE_4X4, keyword="stairs",
+        )
+        collector.record_challenge_image(
+            _tile(), keyword="stairs", captcha_type=CaptchaType.SQUARE_4X4
+        )
+        assert (tmp_path / "collected" / "metadata.jsonl").exists()
+        assert (tmp_path / "collected" / "full" / "metadata.jsonl").exists()
+        assert len(self._full_meta(tmp_path / "collected")) == 1
+
+
 class TestDisabledZeroIO:
     def test_disabled_creates_no_dir(self, tmp_path: Path) -> None:
         config = SolverConfig(collect_data=False, collect_dir=tmp_path / "collected")

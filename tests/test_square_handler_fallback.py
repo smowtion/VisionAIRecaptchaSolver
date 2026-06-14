@@ -37,6 +37,7 @@ def _patch_keyword(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_fallback_to_per_cell_classification_when_coco_missing() -> None:
     detector = MagicMock()
     detector.get_coco_target_class.return_value = None  # "stairs" not in COCO
+    detector.has_custom_detection = False  # no Tier-B model -> per-cell fallback
     # 16 cells; cells 1 and 5 are above threshold (0.7).
     confs = [(i + 1, 0.9 if i in (0, 4) else 0.1) for i in range(16)]
     detector.classify_tiles_with_confidence.return_value = confs
@@ -73,6 +74,7 @@ def test_fallback_sentinel_target_class_returns_empty() -> None:
     # COCO miss + invalid classification id (-1 sentinel) -> no classification, no clicks.
     detector = MagicMock()
     detector.get_coco_target_class.return_value = None
+    detector.has_custom_detection = False
 
     handler = _make_handler(detector)
     result = handler.solve(browser=MagicMock(), target_class=-1)
@@ -85,6 +87,7 @@ def test_fallback_sentinel_target_class_returns_empty() -> None:
 def test_fallback_no_confident_cells_returns_empty() -> None:
     detector = MagicMock()
     detector.get_coco_target_class.return_value = None
+    detector.has_custom_detection = False
     detector.classify_tiles_with_confidence.return_value = [(i + 1, 0.1) for i in range(16)]
 
     handler = _make_handler(detector)

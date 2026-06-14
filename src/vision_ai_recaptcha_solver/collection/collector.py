@@ -192,6 +192,45 @@ class DataCollector:
             # Collector is best-effort telemetry; never let it abort a solve.
             self.logger.debug("DataCollector: failed to record failure: %s", e)
 
+    def record_challenge_image(
+        self,
+        image: NDArray[np.uint8],
+        keyword: str | None,
+        captcha_type: CaptchaType | str | None,
+        reason: str = "detection_4x4",
+    ) -> None:
+        """Save a full (uncropped) challenge image for the detection dataset.
+
+        Separate from ``record_tile`` (per-cell classification): this captures the whole
+        4x4 image + metadata under ``<collect_dir>/full/`` so it can be bbox-annotated
+        later to train a detection model. No-op when disabled; best-effort (never raises
+        into the solve loop).
+        """
+        if not self.enabled:
+            return
+
+        ctype = _type_str(captcha_type)
+        try:
+            full_dir = self.collect_dir / "full"
+            with self._lock:
+                day_dir = full_dir / date.today().isoformat()
+                day_dir.mkdir(parents=True, exist_ok=True)
+                label = (keyword or "unknown").replace(" ", "-")
+                image_path = day_dir / f"{label}_{uuid.uuid4().hex[:8]}.png"
+                cv2.imwrite(str(image_path), image)
+                self._append_metadata(
+                    {
+                        "captcha_type": ctype,
+                        "keyword": keyword,
+                        "reason": reason,
+                        "image_path": str(image_path),
+                    },
+                    subdir="full",
+                )
+        except Exception as e:
+            # Collector is best-effort telemetry; never let it abort a solve.
+            self.logger.debug("DataCollector: failed to record challenge image: %s", e)
+
     def _save_image(
         self,
         image: NDArray[np.uint8],
@@ -211,11 +250,12 @@ class DataCollector:
         cv2.imwrite(str(image_path), image)
         return image_path
 
-    def _append_metadata(self, record: dict[str, Any]) -> None:
-        """Append one JSON record to the metadata.jsonl ledger."""
-        self.collect_dir.mkdir(parents=True, exist_ok=True)
+    def _append_metadata(self, record: dict[str, Any], subdir: str | None = None) -> None:
+        """Append one JSON record to a metadata.jsonl ledger (root, or a subdir)."""
+        target_dir = self.collect_dir / subdir if subdir else self.collect_dir
+        target_dir.mkdir(parents=True, exist_ok=True)
         record = {"ts": _utc_timestamp(), **record}
-        meta_path = self.collect_dir / _METADATA_FILENAME
+        meta_path = target_dir / _METADATA_FILENAME
         with open(meta_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
 

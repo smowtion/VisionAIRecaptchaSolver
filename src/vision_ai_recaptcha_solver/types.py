@@ -390,3 +390,49 @@ COCO_TARGET_MAPPINGS: dict[str, int] = {
     **_BASE_COCO_TARGET_MAPPINGS,
     **_build_multilang_mappings(CLASS_NAMES, _MULTI_LANGUAGE_COCO_IDS),
 }
+
+# Custom 4x4 detection model (Tier B): the reCAPTCHA classes the COCO model LACKS.
+# Order MUST match training/class_mapping.DETECTION_CLASSES (runtime <-> training contract).
+CUSTOM_DETECTION_CLASSES: list[str] = [
+    "bridges",
+    "chimneys",
+    "crosswalks",
+    "mountains or hills",
+    "palm trees",
+    "stairs",
+    "tractors",
+]
+
+_BASE_CUSTOM_DETECTION_MAPPINGS: dict[str, int] = {
+    "bridge": 0,
+    "bridges": 0,
+    "chimney": 1,
+    "chimneys": 1,
+    "crosswalk": 2,
+    "crosswalks": 2,
+    "mountain": 3,
+    "mountains": 3,
+    "palm": 4,
+    "palm tree": 4,
+    "palm trees": 4,
+    "stair": 5,
+    "stairs": 5,
+    "tractor": 6,
+    "tractors": 6,
+}
+
+_MULTI_LANGUAGE_CUSTOM_DETECTION_IDS: dict[str, int] = {
+    "bridges": 0,
+    "chimneys": 1,
+    "crosswalks": 2,
+    "mountains or hills": 3,
+    "palm trees": 4,
+    "stairs": 5,
+    "tractors": 6,
+}
+
+# Target keyword -> custom detection class index (multilingual, derived from CLASS_NAMES).
+CUSTOM_DETECTION_TARGET_MAPPINGS: dict[str, int] = {
+    **_BASE_CUSTOM_DETECTION_MAPPINGS,
+    **_build_multilang_mappings(CLASS_NAMES, _MULTI_LANGUAGE_CUSTOM_DETECTION_IDS),
+}

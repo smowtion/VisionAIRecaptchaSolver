@@ -53,6 +53,16 @@ class SquareCaptchaHandler(BaseCaptchaHandler):
 
         _, main_image = self.download_main_image(img_urls[0])
 
+        # Active-learning hook: capture the full 4x4 image for the detection dataset
+        # (separate from per-cell tile collection). No-op unless collection is enabled.
+        collector = self.detector.collector
+        if collector is not None and collector.enabled:
+            collector.record_challenge_image(main_image, keyword, self.captcha_type)
+
+        # 3-tier priority for 4x4:
+        #   1) COCO detection (yolo12x) when the class is covered
+        #   2) custom Tier-B detection model when loaded and it covers the class
+        #   3) per-cell classification fallback (57k model) — always available
         coco_class = self.detector.get_coco_target_class(keyword)
         if coco_class is not None:
             self.logger.debug(f"Target: '{keyword}' -> COCO class {coco_class}")
@@ -61,8 +71,19 @@ class SquareCaptchaHandler(BaseCaptchaHandler):
                 target_class=coco_class,
                 grid_size=self.GRID_SIZE,
             )
+        elif self.detector.has_custom_detection:
+            custom_class = self.detector.get_custom_detection_class(keyword)
+            if custom_class is not None:
+                self.logger.debug(f"Target: '{keyword}' -> custom detection class {custom_class}")
+                answers = self.detector.detect_for_grid_custom(
+                    main_image,
+                    target_class=custom_class,
+                    grid_size=self.GRID_SIZE,
+                )
+            else:
+                answers = self._classify_cells_fallback(main_image, keyword, target_class)
         else:
-            # COCO has no such class -> classify each of the 16 cells with the 57k model.
+            # No COCO/custom class -> classify each of the 16 cells with the 57k model.
             answers = self._classify_cells_fallback(main_image, keyword, target_class)
 
         # Filter to valid cell range (1-16)

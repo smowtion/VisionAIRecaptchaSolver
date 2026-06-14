@@ -144,3 +144,35 @@ huggingface-cli upload DannyLuna/recaptcha-classification-57k \
 > **Warning:** if a retrain changes the number or order of classes, the runtime mapping in
 > `types.py` / `class_mapping.py` must change in lockstep, or the solver will click the wrong
 > tiles. Keep `FOLDER_ORDER` and the model's `names` aligned.
+
+## Tier B: custom 4x4 detection model (COCO gap)
+
+The bundled COCO model (`yolo12x.pt`) lacks 7 reCAPTCHA classes — bridges, chimneys,
+crosswalks, mountains or hills, palm trees, stairs, tractors. For those, 4x4 currently uses
+the **per-cell classification fallback** (`SquareCaptchaHandler._classify_cells_fallback`).
+Tier B trains a dedicated **detection** model on these classes (better for one large object
+spanning cells) via a separate bbox pipeline. The 4x4 handler runs a 3-tier priority:
+COCO detection → custom detection (if a model is loaded) → per-cell fallback.
+
+> Detection needs **full-image + bounding-box** data, which the per-cell classification
+> flywheel does NOT produce. Tier B has its own collection + annotation pipeline.
+
+1. **Collect full images** — enable collection; `DataCollector.record_challenge_image`
+   saves whole 4x4 images to `collected/full/` + `collected/full/metadata.jsonl`.
+2. **Annotate (cell → bbox)** — `python training/annotate_detection_cli.py --collected-dir
+   collected/full --open`: pick class + cells (1..16); each selected cell becomes one YOLO
+   box (cell-level weak supervision) → `annotations.jsonl`.
+3. **Build detection dataset** — `python training/prepare_detection_dataset.py --annotations
+   collected/full/annotations.jsonl --dataset training/detection_dataset`: emits
+   `images/`, `labels/`, `data.yaml` (names = `class_mapping.DETECTION_CLASSES`).
+4. **Train (cloud GPU)** — `python training/train_detection.py --data
+   training/detection_dataset/data.yaml --device 0` (base `yolo11x.pt`, task detect).
+5. **Export + SHA256 + publish** — `export_onnx.py --weights .../best.pt`,
+   `compute_sha256.py best.onnx`, then set `YOLODetector.CUSTOM_DETECTION_MODEL_URL` +
+   `CUSTOM_DETECTION_SHA256`, upload to Hugging Face.
+6. **Enable at runtime** — `SolverConfig(custom_detection_model_path="...onnx")`. With no
+   path set (default) the runtime is unchanged (COCO + per-cell fallback).
+
+> **Contract:** `types.CUSTOM_DETECTION_CLASSES` (runtime) MUST equal
+> `training/class_mapping.DETECTION_CLASSES` (training) — a test enforces this. A mismatch
+> maps detections to the wrong class.

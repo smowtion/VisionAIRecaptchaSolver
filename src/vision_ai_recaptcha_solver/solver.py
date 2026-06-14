@@ -159,6 +159,7 @@ class RecaptchaSolver:
             fourth_cell_threshold=self.config.fourth_cell_threshold,
             detection_conf_threshold=self.config.detection_conf_threshold,
             collector=self._collector,
+            custom_detection_model_path=self.config.custom_detection_model_path,
         )
 
         # Initialize handlers

@@ -93,5 +93,6 @@ collected/
 
 # Training dataset (raw images live on Hugging Face / git-lfs, not in git)
 training/dataset/
+training/detection_dataset/
 training/runs/
 runs/
