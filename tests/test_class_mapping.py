@@ -9,7 +9,7 @@ from vision_ai_recaptcha_solver.types import CLASS_NAMES, TARGET_MAPPINGS
 
 def test_folder_order_matches_model_class_ids() -> None:
     """FOLDER_ORDER must list folders in classification class-id order (alphabetical)."""
-    assert cm.FOLDER_ORDER == sorted(cm.FOLDER_ORDER)
+    assert sorted(cm.FOLDER_ORDER) == cm.FOLDER_ORDER
     assert len(cm.FOLDER_ORDER) == 14
     for idx, folder in enumerate(cm.FOLDER_ORDER):
         assert cm.FOLDER_TO_CLASS_ID[folder] == idx

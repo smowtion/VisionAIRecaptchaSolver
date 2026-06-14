@@ -374,6 +374,34 @@ class YOLODetector:
         )
         return None
 
+    def is_supported(self, keyword: str | None, captcha_type: CaptchaType) -> bool:
+        """Whether the current challenge can plausibly be solved (drives fast-skip).
+
+        4x4 square challenges run the COCO detection model, so they are supported only
+        when the keyword maps to a COCO class. 3x3 challenges run the classification
+        model (all 14 reCAPTCHA classes), so they are supported when the keyword maps to
+        a classification class. Empty / unmappable keywords are unsupported.
+
+        4x4 is solvable when EITHER the COCO detection model has the class OR the
+        classification model does (the per-cell classification fallback covers the COCO
+        gap, e.g. stairs/bridges/crosswalks).
+
+        Args:
+            keyword: Target keyword extracted from the challenge.
+            captcha_type: The detected challenge type.
+
+        Returns:
+            True if the challenge is plausibly solvable, else False (caller fast-skips).
+        """
+        if not keyword:
+            return False
+        if captcha_type == CaptchaType.SQUARE_4X4:
+            return (
+                self.get_coco_target_class(keyword) is not None
+                or self.get_target_class(keyword) is not None
+            )
+        return self.get_target_class(keyword) is not None
+
     def classify_image(self, image: NDArray[np.uint8]) -> tuple[int, float, str]:
         """Classify a single image using the classification model.
 

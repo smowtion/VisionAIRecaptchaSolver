@@ -148,10 +148,23 @@ Vision AI reCAPTCHA Solver is a ~4,400-line Python library (src/) organized into
 **Key Class:** `SelectionCaptchaHandler(BaseCaptchaHandler)`
 - Prediction → click all predicted tiles → submit once.
 
-### Square Handler (`captcha/square_handler.py` — 84 LOC)
+### Square Handler (`captcha/square_handler.py`)
 **Responsibility:** Handle 4x4 square challenges.
 **Key Class:** `SquareCaptchaHandler(BaseCaptchaHandler)`
-- Single large image split into 16 cells; detection run once.
+- Primary: COCO detection on the full image (`detect_for_grid`, `GRID_SIZE=450` px).
+- Fallback (`_classify_cells_fallback`): when the keyword is not a COCO class
+  (stairs/bridges/crosswalks/chimneys/mountains/palm/tractor), split into 16 cells and
+  classify each with the 57k model (`classify_tiles_with_confidence`, `GRID_CELLS=4`),
+  keep cells with conf ≥ `conf_threshold`. Covers all 14 classes for 4x4.
+
+### Solve robustness (fail-fast + speed)
+- `YOLODetector.is_supported(keyword, captcha_type)`: 4x4 = COCO **or** classification;
+  3x3 = classification. Drives a fast-skip in the solve loop (both solvers): unsupported
+  challenges are cheap-reloaded under a separate `skips` budget (`max_attempts*3`) instead
+  of burning real attempts. `_reload_challenge(fast=)` trims delay on the skip path only.
+- On solve failure the token wait drops from the full `timeout` to `default_timeout` so a
+  failed solve returns fast instead of hanging. Implemented symmetrically in
+  `solver.py` + `async_solver.py`.
 
 ### Image Utils (`captcha/image_utils.py` — 160 LOC)
 **Responsibility:** Image processing helpers.
