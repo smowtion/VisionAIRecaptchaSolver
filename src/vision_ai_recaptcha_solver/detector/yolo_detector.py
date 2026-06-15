@@ -10,7 +10,7 @@ from collections.abc import Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from threading import Lock
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import cv2
 import numpy as np
@@ -20,6 +20,7 @@ from vision_ai_recaptcha_solver.detector.grid_utils import calculate_4x4_cells
 from vision_ai_recaptcha_solver.exceptions import DetectionError, ModelNotFoundError
 from vision_ai_recaptcha_solver.types import (
     COCO_TARGET_MAPPINGS,
+    CUSTOM_DETECTION_TARGET_MAPPINGS,
     TARGET_MAPPINGS,
     CaptchaType,
     DetectionResult,
@@ -27,6 +28,8 @@ from vision_ai_recaptcha_solver.types import (
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
+
+    from vision_ai_recaptcha_solver.collection import DataCollector
 
 
 class YOLODetector:
@@ -42,6 +45,11 @@ class YOLODetector:
     MODEL_DOWNLOAD_URL = "https://huggingface.co/DannyLuna/recaptcha-classification-57k/resolve/main/recaptcha_classification_57k.onnx?download=true"
     MODEL_SHA256 = "4092e8917ee8c2963895d66ba10a97d6ef975c468a95858a8a7bd9e70681b65d"
 
+    # Custom 4x4 detection model (Tier B). Populated once a model is trained + published;
+    # empty until then (custom detection stays disabled, per-cell fallback is used).
+    CUSTOM_DETECTION_MODEL_URL = ""
+    CUSTOM_DETECTION_SHA256 = ""
+
     def __init__(
         self,
         model_path: Path | str | None = None,
@@ -51,6 +59,8 @@ class YOLODetector:
         conf_threshold: float = 0.7,
         fourth_cell_threshold: float = 0.7,
         detection_conf_threshold: float = 0.6,
+        collector: DataCollector | None = None,
+        custom_detection_model_path: Path | str | None = None,
     ) -> None:
         """Initialize the detector with both classification and detection models.
 
@@ -62,11 +72,15 @@ class YOLODetector:
             conf_threshold: Confidence threshold for tile classification.
             fourth_cell_threshold: Threshold to include a 4th cell in selection.
             detection_conf_threshold: Confidence threshold for 4x4 detection model.
+            collector: Optional active-learning data collector. When provided and
+                enabled, uncertain tiles are forwarded for review. Default None keeps
+                full back-compat (no behavior change).
         """
         self.model_path = Path(model_path) if model_path else self.get_model_path()
         self.detection_model_path = detection_model_path or self.DEFAULT_DETECTION_MODEL
         self.verbose = verbose
         self.logger = logger or logging.getLogger(__name__)
+        self.collector = collector
 
         # Store threshold configuration
         self.conf_threshold = conf_threshold
@@ -105,8 +119,43 @@ class YOLODetector:
                 ) from e
         self.logger.debug("Detection model loaded successfully")
 
+        # Optional custom 4x4 detection model (Tier B). None unless a path is configured.
+        self._custom_detection_model: Any = None
+        if custom_detection_model_path is not None:
+            self._load_custom_detection_model(Path(custom_detection_model_path), verbose)
+
         # Start warmup in background
         self.start_warmup_background()
+
+    def _load_custom_detection_model(self, path: Path, verbose: bool) -> None:
+        """Load + integrity-verify the custom 4x4 detection model (Tier B)."""
+        if not path.exists():
+            raise ModelNotFoundError(f"Custom detection model not found at: {path}")
+        if self.CUSTOM_DETECTION_SHA256:
+            self._verify_sha256(path, self.CUSTOM_DETECTION_SHA256)
+        with self._suppress_third_party_logs():
+            try:
+                self._custom_detection_model = YOLO(str(path), task="detect", verbose=verbose)
+            except Exception as e:
+                raise ModelNotFoundError(
+                    f"Failed to load custom detection model '{path}'. Error: {e}"
+                ) from e
+        self.logger.debug("Custom detection model loaded successfully")
+
+    @staticmethod
+    def _verify_sha256(path: Path, expected: str) -> None:
+        """Raise ModelNotFoundError if the file's SHA256 does not match expected."""
+        sha = hashlib.sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(8192), b""):
+                sha.update(chunk)
+        if sha.hexdigest().lower() != expected.lower():
+            raise ModelNotFoundError(f"Custom detection model integrity check failed: {path}")
+
+    @property
+    def has_custom_detection(self) -> bool:
+        """Whether a custom 4x4 detection model is loaded."""
+        return self._custom_detection_model is not None
 
     def __del__(self) -> None:
         """Cleanup resources when the detector is garbage collected."""
@@ -367,6 +416,90 @@ class YOLODetector:
         )
         return None
 
+    def get_custom_detection_class(self, keyword: str) -> int | None:
+        """Map a keyword to the custom 4x4 detection class index, or None.
+
+        Args:
+            keyword: Target keyword from the challenge.
+
+        Returns:
+            Custom detection class index, or None if not a custom-detection class.
+        """
+        keyword_lower = keyword.lower()
+        for key, value in CUSTOM_DETECTION_TARGET_MAPPINGS.items():
+            if key in keyword_lower:
+                return value
+        return None
+
+    def detect_for_grid_custom(
+        self,
+        image: NDArray[np.uint8],
+        target_class: int,
+        grid_size: int = 450,
+        conf_threshold: float | None = None,
+    ) -> list[int]:
+        """Detect with the custom 4x4 model and map detections to grid cells.
+
+        Mirrors ``detect_for_grid`` but runs the custom detection model. Returns [] if no
+        custom model is loaded.
+
+        Args:
+            image: The captcha image.
+            target_class: Custom detection class index.
+            grid_size: Total grid size in pixels (450 for 4x4).
+            conf_threshold: Detection confidence threshold.
+
+        Returns:
+            Sorted 1-indexed cell numbers containing the target.
+        """
+        if self._custom_detection_model is None:
+            return []
+
+        threshold = conf_threshold or self.detection_conf_threshold
+        results = self._custom_detection_model.predict(image, conf=threshold, verbose=False)
+        if not results or len(results) == 0:
+            return []
+        boxes_result = results[0].boxes
+        if boxes_result is None or len(boxes_result) == 0:
+            return []
+
+        all_cells: set[int] = set()
+        for i, cls in enumerate(boxes_result.cls):
+            if int(cls.item()) == target_class:
+                xyxy = boxes_result.xyxy[i].cpu().numpy()
+                bbox = (int(xyxy[0]), int(xyxy[1]), int(xyxy[2]), int(xyxy[3]))
+                all_cells.update(calculate_4x4_cells(bbox, grid_size))
+
+        return sorted(all_cells)
+
+    def is_supported(self, keyword: str | None, captcha_type: CaptchaType) -> bool:
+        """Whether the current challenge can plausibly be solved (drives fast-skip).
+
+        4x4 square challenges run the COCO detection model, so they are supported only
+        when the keyword maps to a COCO class. 3x3 challenges run the classification
+        model (all 14 reCAPTCHA classes), so they are supported when the keyword maps to
+        a classification class. Empty / unmappable keywords are unsupported.
+
+        4x4 is solvable when EITHER the COCO detection model has the class OR the
+        classification model does (the per-cell classification fallback covers the COCO
+        gap, e.g. stairs/bridges/crosswalks).
+
+        Args:
+            keyword: Target keyword extracted from the challenge.
+            captcha_type: The detected challenge type.
+
+        Returns:
+            True if the challenge is plausibly solvable, else False (caller fast-skips).
+        """
+        if not keyword:
+            return False
+        if captcha_type == CaptchaType.SQUARE_4X4:
+            return (
+                self.get_coco_target_class(keyword) is not None
+                or self.get_target_class(keyword) is not None
+            )
+        return self.get_target_class(keyword) is not None
+
     def classify_image(self, image: NDArray[np.uint8]) -> tuple[int, float, str]:
         """Classify a single image using the classification model.
 
@@ -529,9 +662,21 @@ class YOLODetector:
         confidences = self.get_target_confidences_batch(tiles, target_class)
 
         results: list[tuple[int, float]] = []
-        for cell_num, target_conf in zip(cell_nums, confidences, strict=True):
+        collect = self.collector is not None and self.collector.enabled
+        for tile, cell_num, target_conf in zip(tiles, cell_nums, confidences, strict=True):
             results.append((cell_num, target_conf))
             self.logger.debug(f"Tile {cell_num}: {target_name} conf {target_conf:.2f}")
+
+            # Active-learning hook: reuse the already-cropped tile (DRY); collector
+            # applies the uncertain-band threshold and stays a no-op when disabled.
+            if collect:
+                assert self.collector is not None
+                self.collector.record_tile(
+                    tile,
+                    cell=cell_num,
+                    confidence=target_conf,
+                    predicted_class=target_name,
+                )
 
         return results
 

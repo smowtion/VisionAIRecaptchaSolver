@@ -63,6 +63,12 @@ class SolverConfig:
             signal handlers. Default is True.
         cleanup_tmp_on_close: Whether to delete the temporary download directory when
             close() is called. Default is True.
+        collect_data: Opt-in active-learning data collection. When True, the solver
+            saves uncertain/failed/unknown tiles to ``collect_dir`` for later review.
+            Default is False (PyPI users are unaffected; zero I/O when off).
+        collect_dir: Directory where collected tiles + metadata are written. Kept fully
+            separate from ``download_dir`` so it is never deleted by tmp cleanup.
+            If None (default), the collector resolves a local ``collected/`` directory.
     """
 
     model_path: Path | str | None = None
@@ -97,6 +103,15 @@ class SolverConfig:
 
     # Cleanup
     cleanup_tmp_on_close: bool = True
+
+    # Data collection (active learning) - opt-in, disabled by default
+    collect_data: bool = False
+    collect_dir: Path | str | None = None
+
+    # Custom 4x4 detection model (Tier B). When set, 4x4 challenges for classes the COCO
+    # model lacks use this detection model instead of the per-cell classification fallback.
+    # None (default) keeps current behavior (COCO + per-cell fallback).
+    custom_detection_model_path: Path | str | None = None
 
     _server_port_explicit: bool = field(init=False, repr=False, default=False)
     _download_dir_explicit: bool = field(init=False, repr=False, default=False)
@@ -155,6 +170,25 @@ class SolverConfig:
         if self.image_download_retry_delay < 0:
             raise ValueError(
                 f"image_download_retry_delay must be non-negative, got {self.image_download_retry_delay}"
+            )
+
+        # Validate / normalize collect_dir (kept separate from download_dir)
+        if self.collect_dir is not None:
+            if not isinstance(self.collect_dir, str | Path):
+                raise ValueError(
+                    f"collect_dir must be a str or Path, got {type(self.collect_dir).__name__}"
+                )
+            object.__setattr__(self, "collect_dir", Path(self.collect_dir))
+
+        # Validate / normalize custom detection model path
+        if self.custom_detection_model_path is not None:
+            if not isinstance(self.custom_detection_model_path, str | Path):
+                raise ValueError(
+                    "custom_detection_model_path must be a str or Path, got "
+                    f"{type(self.custom_detection_model_path).__name__}"
+                )
+            object.__setattr__(
+                self, "custom_detection_model_path", Path(self.custom_detection_model_path)
             )
 
         # Validate proxy URL format if provided

@@ -23,6 +23,7 @@ from vision_ai_recaptcha_solver.browser.navigation import (
 from vision_ai_recaptcha_solver.captcha.dynamic_handler import DynamicCaptchaHandler
 from vision_ai_recaptcha_solver.captcha.selection_handler import SelectionCaptchaHandler
 from vision_ai_recaptcha_solver.captcha.square_handler import SquareCaptchaHandler
+from vision_ai_recaptcha_solver.collection import DataCollector
 from vision_ai_recaptcha_solver.config import SolverConfig
 from vision_ai_recaptcha_solver.detector.yolo_detector import YOLODetector
 from vision_ai_recaptcha_solver.exceptions import (
@@ -87,6 +88,8 @@ class AsyncRecaptchaSolver:
         self._handlers: dict[CaptchaType, BaseCaptchaHandler] | None = None
         self._replicator: Any = None
         self._owns_download_dir: bool = False
+        # Opt-in active-learning collector (no-op unless config.collect_data is True)
+        self._collector = DataCollector(self.config, self.logger)
         self._init_download_dir()
 
     def _init_download_dir(self) -> None:
@@ -197,6 +200,8 @@ class AsyncRecaptchaSolver:
             conf_threshold=self.config.conf_threshold,
             fourth_cell_threshold=self.config.fourth_cell_threshold,
             detection_conf_threshold=self.config.detection_conf_threshold,
+            collector=self._collector,
+            custom_detection_model_path=self.config.custom_detection_model_path,
         )
 
         # Initialize handlers
@@ -350,70 +355,50 @@ class AsyncRecaptchaSolver:
             assert self._detector is not None
             await self._run_in_executor(self._detector.ensure_warmup_complete)
 
-            # Solve loop
-            while attempts < self.config.max_attempts:
-                attempts += 1
-                self.logger.debug(f"Solve attempt {attempts}/{self.config.max_attempts}")
-
+            # Solve loop. Real attempts capped by max_attempts; unsolvable challenges are
+            # fast-skipped (cheap reload) under a separate skip budget so we keep cycling
+            # toward a solvable challenge instead of burning real attempts.
+            max_skips = self.config.max_attempts * 3
+            skips = 0
+            solved = False
+            while attempts < self.config.max_attempts and skips < max_skips:
                 try:
-                    # Determine captcha type and get target
                     captcha_type = await self._run_in_executor(
                         self._determine_captcha_type, browser
                     )
                     last_captcha_type = captcha_type
-                    target_class = await self._run_in_executor(self._get_target_class, browser)
+                    keyword = await self._run_in_executor(get_target_keyword, browser)
+                    self._collector.set_context(captcha_type=captcha_type, keyword=keyword)
 
-                    if target_class is None:
-                        self.logger.info("Unknown target, reloading captcha")
-                        await self._run_in_executor(click_reload_button, browser)
+                    assert self._detector is not None
+                    # Fast-skip challenges we cannot solve (not counted as a real attempt).
+                    if not self._detector.is_supported(keyword, captcha_type):
+                        skips += 1
+                        self.logger.info(
+                            f"Unsupported challenge (type={captcha_type.value}, "
+                            f"keyword='{keyword}'), fast-reloading (skip {skips}/{max_skips})"
+                        )
                         await self._run_in_executor(
-                            human_delay,
-                            self.config.human_delay_mean,
-                            self.config.human_delay_sigma,
+                            self._collector.record_failure,
+                            captcha_type,
+                            keyword or None,
+                            "unknown_keyword",
                         )
-                        # Get new challenge
-                        challenge_frame = await self._run_in_executor(
-                            get_challenge_iframe,
-                            browser,
-                            self.config.default_timeout,
-                        )
-                        if challenge_frame:
-                            await self._run_in_executor(
-                                lambda cf: cf.ele(
-                                    "#rc-imageselect-target td",
-                                    timeout=self.config.default_timeout,
-                                ),
-                                challenge_frame,
-                            )
+                        await self._run_in_executor(self._reload_challenge_sync, browser, True)
                         continue
 
-                    # Get handler and solve
+                    attempts += 1
+                    self.logger.debug(f"Solve attempt {attempts}/{self.config.max_attempts}")
+
+                    target_class = self._detector.get_target_class(keyword)
                     handler = self._get_handler(captcha_type)
                     clicked_cells = await self._run_in_executor(
-                        handler.solve, browser, target_class
+                        handler.solve, browser, target_class if target_class is not None else -1
                     )
 
                     if not clicked_cells:
                         self.logger.info("No cells clicked, reloading")
-                        await self._run_in_executor(click_reload_button, browser)
-                        await self._run_in_executor(
-                            human_delay,
-                            self.config.human_delay_mean,
-                            self.config.human_delay_sigma,
-                        )
-                        challenge_frame = await self._run_in_executor(
-                            get_challenge_iframe,
-                            browser,
-                            self.config.default_timeout,
-                        )
-                        if challenge_frame:
-                            await self._run_in_executor(
-                                lambda cf: cf.ele(
-                                    "#rc-imageselect-target td",
-                                    timeout=self.config.default_timeout,
-                                ),
-                                challenge_frame,
-                            )
+                        await self._run_in_executor(self._reload_challenge_sync, browser, False)
                         continue
 
                     # Click verify
@@ -425,6 +410,7 @@ class AsyncRecaptchaSolver:
                         wait_for_verify_result, browser, self.config.default_timeout
                     ):
                         self.logger.info("Captcha solved successfully!")
+                        solved = True
                         break
 
                     # Not solved, continue to next attempt
@@ -432,36 +418,27 @@ class AsyncRecaptchaSolver:
 
                 except LowConfidenceError as e:
                     self.logger.info(f"Low confidence detection, reloading: {e}")
-                    await self._run_in_executor(click_reload_button, browser)
-                    await self._run_in_executor(
-                        human_delay,
-                        self.config.human_delay_mean,
-                        self.config.human_delay_sigma,
-                    )
-                    challenge_frame = await self._run_in_executor(
-                        get_challenge_iframe,
-                        browser,
-                        self.config.default_timeout,
-                    )
-                    if challenge_frame:
-                        await self._run_in_executor(
-                            lambda cf: cf.ele(
-                                "#rc-imageselect-target td",
-                                timeout=self.config.default_timeout,
-                            ),
-                            challenge_frame,
-                        )
+                    await self._run_in_executor(self._reload_challenge_sync, browser, False)
 
                 except (ElementNotFoundError, UnsupportedCaptchaError) as e:
-                    self.logger.warning(f"Attempt {attempts} failed: {e}")
+                    self.logger.warning(f"Attempt failed: {e}")
                     await self._run_in_executor(human_delay, 0.5, 0.1)
 
-            # Extract token
+            # Extract token. Short wait on failure to avoid hanging the full timeout for a
+            # token that will never arrive; full timeout only when a challenge was solved.
+            wait_timeout = (
+                self.config.timeout
+                if solved
+                else min(self.config.default_timeout, self.config.timeout)
+            )
             token = await self._run_in_executor(
-                lambda: token_handle.wait(timeout=self.config.timeout) if token_handle else None
+                lambda: token_handle.wait(timeout=wait_timeout) if token_handle else None
             )
 
             if not token:
+                await self._run_in_executor(
+                    self._collector.record_failure, last_captcha_type, None, "failed"
+                )
                 raise TokenExtractionError("Failed to extract reCAPTCHA token")
 
             result_cookies = await self._run_in_executor(self._get_cookies, browser)
@@ -532,12 +509,24 @@ class AsyncRecaptchaSolver:
         else:
             return CaptchaType.SELECTION_3X3
 
-    def _get_target_class(self, browser: Any) -> int | None:
-        """Get the YOLO class index for the target object."""
-        keyword = get_target_keyword(browser)
-        if not keyword or self._detector is None:
-            return None
-        return self._detector.get_target_class(keyword)
+    def _reload_challenge_sync(self, browser: Any, fast: bool = False) -> None:
+        """Reload the challenge and wait for the new grid (sync; runs in the thread pool).
+
+        Args:
+            browser: Browser instance.
+            fast: Use a minimal delay (cheap skip of an unsolvable challenge).
+        """
+        click_reload_button(browser)
+        if fast:
+            human_delay(mean=0.05, sigma=0.02)
+        else:
+            human_delay(mean=self.config.human_delay_mean, sigma=self.config.human_delay_sigma)
+        challenge_frame = get_challenge_iframe(browser, timeout=self.config.default_timeout)
+        if challenge_frame:
+            challenge_frame.ele(
+                "#rc-imageselect-target td",
+                timeout=self.config.default_timeout,
+            )
 
     def _get_handler(self, captcha_type: CaptchaType) -> BaseCaptchaHandler:
         """Get the appropriate handler for a captcha type."""

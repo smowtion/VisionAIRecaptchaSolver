@@ -223,3 +223,39 @@ class TestProxyValidation:
         """Test that malformed proxy URL raises error."""
         with pytest.raises(ValueError, match="Invalid proxy URL format"):
             SolverConfig(proxy="not-a-valid-proxy")
+
+
+class TestDataCollectionConfig:
+    """Tests for the opt-in data collection config fields."""
+
+    def test_collect_data_defaults_off(self) -> None:
+        """Data collection must default to disabled (PyPI users unaffected)."""
+        config = SolverConfig()
+        assert config.collect_data is False
+
+    def test_collect_dir_defaults_none(self) -> None:
+        """collect_dir must default to None (collector resolves a default)."""
+        config = SolverConfig()
+        assert config.collect_dir is None
+
+    def test_collect_dir_str_coerced_to_path(self, tmp_path: Path) -> None:
+        """A valid collect_dir string is coerced to a Path."""
+        config = SolverConfig(collect_data=True, collect_dir=str(tmp_path / "collected"))
+        assert isinstance(config.collect_dir, Path)
+        assert config.collect_dir == tmp_path / "collected"
+
+    def test_collect_dir_path_kept(self, tmp_path: Path) -> None:
+        """A Path collect_dir is preserved as a Path."""
+        target = tmp_path / "collected"
+        config = SolverConfig(collect_data=True, collect_dir=target)
+        assert config.collect_dir == target
+
+    def test_collect_dir_invalid_type_raises(self) -> None:
+        """A non str/Path collect_dir raises ValueError."""
+        with pytest.raises(ValueError, match="collect_dir must be a str or Path"):
+            SolverConfig(collect_dir=123)  # type: ignore[arg-type]
+
+    def test_collect_dir_separate_from_download_dir(self, tmp_path: Path) -> None:
+        """collect_dir must not affect download_dir (no accidental cleanup)."""
+        config = SolverConfig(collect_data=True, collect_dir=tmp_path / "collected")
+        assert config.collect_dir != config.download_dir
