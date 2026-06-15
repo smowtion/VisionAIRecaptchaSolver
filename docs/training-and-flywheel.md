@@ -199,3 +199,22 @@ COCO detection → custom detection (if a model is loaded) → per-cell fallback
 > **Contract:** `types.CUSTOM_DETECTION_CLASSES` (runtime) MUST equal
 > `training/class_mapping.DETECTION_CLASSES` (training) — a test enforces this. A mismatch
 > maps detections to the wrong class.
+
+## Collection findings (Google demo, observed)
+
+Empirical notes from running `collect.py` against the Google reCAPTCHA demo:
+
+- **Throughput:** ~1 solve / 4–6 min (each run re-inits a fresh solver + reloads models).
+  ~5–10 full 4x4 images per run (one solve cycles through several 4x4 reloads).
+- **Class skew:** the demo overwhelmingly serves **COCO** classes (motorcycles, bicycles,
+  buses, traffic lights). Of the 7 detection-gap classes, only **stairs** (and a few
+  **crosswalks**) appear with any frequency; bridges/chimneys/mountains/palm trees/tractors
+  were essentially **never served**. Gap-class yield ≈ 10% of collected images.
+- **Rate limiting:** Google starts blocking after ~15–20 consecutive runs — symptoms are
+  `solved` stalling, rising `failed`, and `.rc-imageselect-payload` element-not-found errors.
+  A break (hours) resets it. Keep `--delay` ≥ 3s and stop on a stall+failures signal.
+- **Implication:** the demo alone cannot supply a balanced 7-class detection set. For the
+  missing classes, collect from **diverse real targets** (varied sites/sitekeys), not just
+  the demo. The demo is fine for **stairs** (and validating the pipeline end-to-end).
+- **Sample run:** ~103 full 4x4 images collected over ~20 runs → 16 stairs + 2 crosswalks
+  gap-class; rest COCO. Auto-labeled via CapMonster image mode (~$0.04/1000).
